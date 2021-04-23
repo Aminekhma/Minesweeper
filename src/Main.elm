@@ -1,4 +1,5 @@
 module Main exposing (..)
+-- Minesweeper game for elm, try it out at: https://elm-lang.org/examples/groceries (paste this code there)
 
 import Browser
 import Html exposing (Html, button, div, text, br,h1)
@@ -6,73 +7,66 @@ import Html.Events as HEV exposing (onClick, custom)
 import Html.Attributes exposing (style)
 import Html.Attributes as A
 import Html.Events as E
-import Random
 
+import Json.Decode as Json
+import Random
 import Mine
 import Random exposing (Generator)
 
-type alias Cell =
-    { id : Int, isMine : Bool, revealed : Bool, flagged: Bool }
 
-type alias Model = {cells: List Cell, died: Bool, won: Bool}
-
+width = 10
+height = 10
+totalBombs = 10
+main =
+  Browser.element { init = init, update = update, subscriptions = subscriptions, view = boardView }
+ 
+type alias Cell = {value: Int, isBomb: Bool, revealed: Bool, flagged: Bool} 
 type alias CellID = Int
+type alias Model = {available: List Int, cells: List Cell, died: Bool, won: Bool}
 
-emptyCell : { id : number, isMine : Bool, revealed : Bool, flagged : Bool }
-emptyCell = {id=0, isMine=False, revealed=False, flagged=False}
+type Msg = Reset | Generate Int | Reveal CellID | Flag CellID
 
-init: () -> (Model, Cmd Msg)
-init _ = ({
-       cells = [],      
-       died=False,
-      won=False
-    },exampleGenerateRandomMines)
+emptyCell = {value=0, isBomb=False, revealed=False, flagged=False}
 
-exampleGenerateRandomMines : Cmd Msg
-exampleGenerateRandomMines =
-    Mine.generateRandomMines
-        { width = 100
-        , height = 100
-        , minMines = 10
-        , maxMines = 30
-        , initialX = 0
-        , initialY = 0
-        }
-        MinesGenerated
-
---Mettre une bombe aux coordonnées de la liste MinesGenerated
-putBomb : Int -> List(Int) ->Bool
-putBomb x l =
-    if List.member x l then
-        True
-    else
-        False
-
-type Msg
-    = MinesGenerated (List ( Int)) 
-    | NewGame
-    | Reveal CellID 
-
-update : Msg -> Model -> ( Model, Cmd Msg )
+-- Updating state
+update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
-    case msg of
-        MinesGenerated listbomb -> ({ model | cells = List.map (\x -> { id = x, isMine = putBomb x listbomb, revealed = False, flagged = False })(List.range 1 100)}, Cmd.none)
-        Reveal id ->
-            ({ model
-                | cells = model.cells |> List.map (\cell -> if id == cell.id then
-                                                                { cell | revealed = True }
-                                                            else
-                                                                cell )},Cmd.none)        
-        NewGame -> init()
-        --Reveal n -> (checkLoose (revealAll model n), Cmd.none)
+  case msg of
+    Reset -> init ()
+    Generate id -> (
+      addBomb model (get id model.available),
+      getBombIndex (List.length model.available - 1))
+    Reveal id -> (checkWin (revealAll model id), Cmd.none)
+    Flag id -> (
+      {model | cells=
+        (List.indexedMap
+          (\index cell -> 
+            if index == id then
+              {cell | flagged = not cell.flagged}
+            else
+              cell
+          )
+          model.cells
+        )
+      }, 
+      Cmd.none)
 
-checkLoose: Model -> Model
-checkLoose model = {model | died = (List.foldl (\cell died -> died && ((cell.isMine && cell.revealed))) True model.cells)}
-
+checkWin: Model -> Model
+checkWin model = 
+  {model | won=
+    (List.foldl
+      (\cell won -> 
+        won && ((cell.isBomb && not cell.revealed) || cell.revealed)
+      )
+      True
+      model.cells
+    )
+  }
+    
 -- Cell revealing
 revealAll: Model -> CellID -> Model
 revealAll model id = 
-  if (getCell model id).id==0 && not (getCell model id).isMine then
+  if (getCell model id).value==0 && not (getCell model id).isBomb then
     {model | cells = 
       (List.indexedMap
         (revealMap (reveal model id []))
@@ -85,10 +79,10 @@ revealAll model id =
         (revealMapOne id)
         model.cells
       ),
-      died = model.died || (getCell model id).isMine
+      died = model.died || (getCell model id).isBomb
     }
     
----------------------------------------------------------------------------------------------     
+     
 revealMapOne: CellID -> CellID -> Cell -> Cell
 revealMapOne revealedId id cell =
   if revealedId == id then
@@ -117,98 +111,288 @@ revealFilter model revealedId idAndCell revealed =
     abs ((getX (Tuple.first idAndCell)) - (getX revealedId)) <= 1 && 
     abs ((getY (Tuple.first idAndCell)) - (getY revealedId)) <= 1 
   ) then (
-    if (Tuple.second idAndCell).id==0 then
+    if (Tuple.second idAndCell).value==0 then
       reveal model (Tuple.first idAndCell) ((Tuple.first idAndCell) :: revealed)
     else
       (Tuple.first idAndCell) :: revealed
   ) else
     revealed
-
-------------------------------------------------------------------
-
-view : Model -> Html Msg
-view model =
-        if model.died == False then
-            div[]
-            [ h1 [] [ text "Minesweeper" ]
-            , text "Play !",
-            div [ A.class "myGrid"]
-            (List.map (viewCell model.cells)model.cells), br[][],button [A.class "button", onClick NewGame] [text "Restart"] ]
-        else
-            h1 [] [ text "Minesweeper" ]
-            
-
-main : Program () Model Msg
-main =
-  Browser.element { init = init, update = update, subscriptions = always Sub.none, view = view }
-
-
-numberOfBombsAround : List Cell -> Int -> Int
-numberOfBombsAround cells id =
-    let
-        leftNeighbours leftCells x =
-            List.filter (\cell -> abs ((cell.id - 10) - x) == 1 && cell.isMine) leftCells
-
-        rightNeighbours rightCells x =
-            List.filter (\cell -> abs ((cell.id + 10) - x) == 1 && cell.isMine) rightCells
-
-        neighbours asideCells x =
-            List.filter (\cell -> abs (cell.id - x) == 1 && cell.isMine) asideCells
-
-        upDownNeighbours upDownCells x =
-            List.filter (\cell -> abs (cell.id - x) == 10 && cell.isMine) upDownCells
-
-        inTheGrid inCells =
-            List.filter (\cell -> cell.id > 0 && cell.id < 101) inCells
-    in
-    List.append (leftNeighbours (inTheGrid cells) id) (rightNeighbours (inTheGrid cells) id)
-        |> List.append (neighbours (inTheGrid cells) id)
-        |> List.append (upDownNeighbours (inTheGrid cells) id)
-        |> List.length
-
-
-viewCell : List Cell -> Cell -> Html Msg
-viewCell cells cell =
-    button
-        [  onClick (Reveal cell.id), A.style "width" "50px", A.style "height" "50px" ]
-        [ if cell.revealed then
-            if cell.isMine then
-                text "💣"
-
-            else
-                text (String.fromInt (numberOfBombsAround cells cell.id))
-
-          else
-            text ""
-        ]
-
-revealIfId : Int -> Cell -> Cell
-revealIfId id cell =
-    if cell.id /= id then
-        cell
-    else
-        { id = cell.id, isMine = cell.isMine, revealed = True, flagged=False }
-
-isRevealed : Cell -> Cell
-isRevealed cell =
+    
+-- Field init
+init: () -> (Model, Cmd Msg)
+init _ = (
+    {
+      available =
+        (generateNumbers 
+          (width * height - 1)
+        ),
+      cells = 
+        (List.repeat 
+          (width * height) 
+          emptyCell
+        ),
+      died=False,
+      won=False
+    },
+    getBombIndex (width * height)
+  )
+        
+getBombIndex: Int -> Cmd Msg
+getBombIndex availableCount = 
+  if (width * height) - availableCount < totalBombs then
+    Random.generate
+      Generate
+      (Random.int 
+        0 
+        (availableCount - 1)
+      )
+ else
+   Cmd.none
+    
+        
+addBomb: Model -> CellID -> Model
+addBomb model id = {
+    model |
+    available = 
+      (List.filter 
+        (notEquals id) 
+        model.available
+      ),
+    cells = 
+      (List.indexedMap
+        (addBombAt 
+          model.cells 
+          (getX id) 
+          (getY id)
+        )
+        model.cells
+      )
+  }
+  
+addBombAt: List Cell -> Int -> Int -> Int -> Cell -> Cell
+addBombAt cells x y cellIndex cell = 
+  if (getX cellIndex) == x && (getY cellIndex) == y then
+    {cell | isBomb = True}
+  else if abs ((getX cellIndex) - x) <= 1 && abs ((getY cellIndex) - y) <= 1 then
+    {cell | value = cell.value + 1}
+  else
     cell
-
+  
 -- utils
 getX: CellID -> Int
-getX index = modBy 10 index
+getX index = modBy width index
 
 getY: CellID -> Int
-getY index = index // 10
+getY index = index // width
 
 getCellXY: Model -> Int -> Int -> Cell
-getCellXY model x y = getCell model (y * 10 + x)
+getCellXY model x y = getCell model (y * width + x)
 
 getCell: Model -> CellID -> Cell
 getCell model id = 
   Maybe.withDefault
     emptyCell
-    (List.head (List.drop id model.cells))
+    (List.head
+      (List.drop
+        id
+        model.cells
+      )
+    )
 
+notEquals: a -> a -> Bool
+notEquals a b = a /= b
+
+generateNumbers: Int -> List Int
+generateNumbers remaining = 
+  if remaining == -1 then
+    []
+  else
+    remaining :: (generateNumbers (remaining - 1))
+    
+get: Int -> List number -> number
+get index list = 
+  Maybe.withDefault
+    0
+    (List.head
+      (List.drop
+        index
+        list
+      )
+    )
+    
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+  Sub.none
+
+onRightClick : msg -> Html.Attribute msg
+onRightClick msg =
+    HEV.custom "contextmenu"
+        (Json.succeed
+            { message = msg
+            , stopPropagation = True
+            , preventDefault = True
+            }
+        )
+        
+boardView: Model -> Html Msg
+boardView model = 
+  div 
+    [
+    style "background" "rgb(0, 70, 128)",
+    style "background-position" "center",
+    style "background-size" "cover",
+    style "min-height" "100vh",
+    style "overflow" "hidden",
+    style "background-blend-mode" "overlay"]
+    (          
+
+      (if model.died then
+        [
+          div [] [h1 [
+            style "text-align" "center", 
+            style "background-color" "red",
+            style "font-weight" "600",
+            style "color" "black",
+            style "padding" "10px 10px",
+            style "top" "60px",
+            style "left" "35%"             
+             ] [ text "Game Over"]],  
+             br [] [],
+          button [onClick Reset,
+            style "position" "absolute",
+            style "color" "#fff",
+            style "font-weight" "600",
+            style "text-align" "center",
+            style "width" "150px",
+            style "height" "40px",
+            style "background" "black",
+            style "z-index" "1",
+            style "cursor" "pointer",
+            style "border-bottom-right-radius" "3px",
+            style "border-top-right-radius" "3px",
+            style "border-radius" "50px",
+            style "margin" "0",
+            style "left" "45%",
+            style "position" "absolute",
+            style "top" "12%" 
+              ] [text "RESTART"],
+          br [] []
+        ]
+      else if model.won then
+        [
+          div [] [h1 [
+            style "text-align" "center", 
+            style "background-color" "green",
+            style "font-weight" "600",
+            style "color" "white",
+            style "padding" "10px 10px",
+            style "top" "60px",
+            style "left" "35%"             
+             ] [ text "YOU WON !"]],br [][],
+          button [onClick Reset,
+            style "position" "absolute",
+            style "color" "#fff",
+            style "font-weight" "600",
+            style "text-align" "center",
+            style "width" "150px",
+            style "height" "40px",
+            style "background" "black",
+            style "z-index" "1",
+            style "cursor" "pointer",
+            style "border-bottom-right-radius" "3px",
+            style "border-top-right-radius" "3px",
+            style "border-radius" "50px",
+            style "margin" "0",
+            style "left" "45%",
+            style "position" "absolute",
+            style "top" "12%" 
+              ] [text "RESTART"],
+          br [] []
+        ]
+      else
+        [h1 [
+            style "text-align" "center", 
+            style "background-color" "black",
+            style "font-weight" "600",
+            style "color" "#fff",
+            style "padding" "10px 10px",
+            style "top" "60px",
+            style "left" "35%"             
+             ] [ text "Minesweeper"]]
+      ) ++
+      (List.concat
+        (List.indexedMap 
+          (cellView model) 
+          model.cells
+        )
+      )
+    )
+      
+
+cellStyle = 
+  [
+    style "vertical-align" "top",
+    style "grid-template-columns" "repeat(10, 50px)",
+    style "grid-auto-rows" "auto",
+    style "z-index" "1",
+    style "zcursor" "pointer",
+    style "zright" "0",
+    style "zborder-bottom-right-radius" "3px",
+    style "zborder-top-right-radius" "3px",
+    style "zborder-radius" "50px",
+    style "zdisplay" "flex",
+    style "text-align" "center",
+    style "vertical-align" "middle",
+    style "margin" "0 auto",
+    style "top" "20px",
+    style "left" "34%",
+    style "position" "relative",
+    style "width" "50px",
+    style "height" "50px",
+    style "margin" "0 auto",
+    style "padding" "0",
+    style "display" "inline-block",
+    style "line-height" "50px",
+    style "text-align" "center",
+    style "color" "black",
+    style "font-weight" "600",
+    style " border" "1px dotted black"
+  ]
+
+cellView: Model -> CellID -> Cell -> List (Html Msg)
+cellView model id cell = 
+  newLine 
+    id
+    (
+      if cell.revealed then (
+        if cell.isBomb then 
+          div ([style "background-color" "red"] ++ cellStyle) [text "💣"]
+        else
+          button ([
+            style "background-color" "green"
+          ] ++ cellStyle) [
+            text (String.fromInt cell.value)
+          ]
+      ) else if cell.flagged then
+        button ([
+          style "background-color" "orange",
+          onRightClick (Flag id)
+        ] ++ cellStyle) [text "F"]
+      else 
+        button ([ 
+          style "background-color" "rgb(172, 171, 171)"
+        ] ++ cellStyle ++ (
+          if not model.died then 
+            [
+              onClick (Reveal id),
+              onRightClick (Flag id)
+            ]
+          else
+            []
+        )) []
+    )
+    
 newLine: CellID -> Html Msg -> List (Html Msg)
 newLine index el= 
   if getX (index + 1) == 0 then

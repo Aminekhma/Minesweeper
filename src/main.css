@@ -14,13 +14,19 @@ body {
   margin: 0;
   text-align: center;
   color: #293c4b;
-  background: rgb(0, 70, 128);
+  background: rgb(98, 0, 128);
 
 }
 
 h1 {
-  font-size: 30px;
-  color: white;
+    font-weight: 600;
+    text-align: center;
+    background-color: rgb(172, 171, 171);
+    color: #fff;
+    padding: 10px 10px;
+    top: 60px;
+    left: 35%;
+    position: relative;
 
 }
 
@@ -30,12 +36,4 @@ img {
   max-width: 200px;
 }
 
-.myGrid {
-  display: grid;
-  grid-template-columns: repeat(10, 50px);
-  grid-auto-rows: auto;
-  margin-left: 35%;
-  margin-top: 20px;
-  grid-gap: 2px;
 
-}
